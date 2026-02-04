@@ -94,7 +94,7 @@ class MultipartUploadController {
     } else {
       // First start
       _cancelToken = CancelToken();
-      await _startUpload();
+      _startUpload();
 
       // Check if paused after start attempt
       if (_state == UploadState.paused) {
