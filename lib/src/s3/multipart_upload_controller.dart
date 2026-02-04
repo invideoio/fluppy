@@ -35,7 +35,7 @@ class MultipartUploadController {
   // State
   UploadState _state = UploadState.idle;
   CancelToken? _cancelToken;
-  final Completer<UploadResponse> _completer = Completer();
+  UploadResponse? _result;
 
   /// Whether the upload has been started (first time).
   bool _uploadStarted = false;
@@ -70,13 +70,12 @@ class MultipartUploadController {
   ///
   /// Returns a Future that completes when the upload is finished.
   Future<UploadResponse> start() async {
-    // If already completed, return the existing result
-    if (_state == UploadState.completed && _completer.isCompleted) {
-      return _completer.future;
+    if (_state == UploadState.completed && _result != null) {
+      return _result!;
     }
 
     if (_state == UploadState.cancelled) {
-      throw CancelledException();
+      throw CancelledException("Upload was cancelled");
     }
 
     if (_uploadStarted) {
@@ -85,24 +84,12 @@ class MultipartUploadController {
         _cancelToken!.cancel(_pausingReason);
       }
       _cancelToken = CancelToken();
-      await _resumeUpload();
-
-      // Check if paused after resume attempt
-      if (_state == UploadState.paused) {
-        throw PausedException();
-      }
+      return await _resumeUpload();
     } else {
       // First start
       _cancelToken = CancelToken();
-      await _startUpload();
-
-      // Check if paused after start attempt
-      if (_state == UploadState.paused) {
-        throw PausedException();
-      }
+      return await _startUpload();
     }
-
-    return _completer.future;
   }
 
   /// Pauses the upload.
@@ -139,54 +126,41 @@ class MultipartUploadController {
 
     _state = UploadState.cancelled;
     _cancelToken?.cancel();
-
-    if (!_completer.isCompleted) {
-      _completer.completeError(CancelledException());
-    }
   }
 
   /// Starts the upload for the first time.
-  Future<void> _startUpload() async {
+  Future<UploadResponse> _startUpload() async {
     _state = UploadState.running;
     _uploadStarted = true;
 
     try {
-      // Create multipart upload
-
       final result = await options.createMultipartUpload(file);
 
       file.s3Multipart.uploadId = result.uploadId;
       file.s3Multipart.key = result.key;
       file.s3Multipart.isMultipart = true;
 
-      // Upload parts
       await _uploadParts();
 
-      // Complete
       final response = await _completeUpload();
-
       _state = UploadState.completed;
-      if (!_completer.isCompleted) {
-        _completer.complete(response);
-      }
+      _result = response;
+      return response;
     } catch (e) {
       if (_isPausingError(e)) {
-        // This is a pause, not an error - wait for resume
-        return;
+        throw PausedException();
       }
-
-      _state = UploadState.error;
-      if (!_completer.isCompleted) {
-        _completer.completeError(e);
+      if (_state != UploadState.cancelled) {
+        _state = UploadState.error;
       }
+      rethrow;
     }
   }
 
   /// Resumes the upload after being paused.
-  Future<void> _resumeUpload() async {
-    // If already completed, don't resume
-    if (_state == UploadState.completed && _completer.isCompleted) {
-      return;
+  Future<UploadResponse> _resumeUpload() async {
+    if (_state == UploadState.completed && _result != null) {
+      return _result!;
     }
 
     _state = UploadState.running;
@@ -211,25 +185,18 @@ class MultipartUploadController {
 
       // Complete
       final response = await _completeUpload();
-
       _state = UploadState.completed;
-      if (!_completer.isCompleted) {
-        _completer.complete(response);
-      }
+      _result = response;
+      return response;
     } catch (e) {
       if (_isPausingError(e)) {
-        // This is a pause, not an error - convert to PausedException so fluppy.resume() can handle it
-
-        // Set state back to paused
         _state = UploadState.paused;
-        // Throw PausedException so fluppy.resume() can catch it and handle properly
         throw PausedException();
       }
-
-      _state = UploadState.error;
-      if (!_completer.isCompleted) {
-        _completer.completeError(e);
+      if (_state != UploadState.cancelled) {
+        _state = UploadState.error;
       }
+      rethrow;
     }
   }
 
@@ -521,7 +488,7 @@ class MultipartUploadController {
         if (cancelError.contains(_pausingReason) || e.message == _pausingReason) {
           throw CancelledException(_pausingReason);
         }
-        throw CancelledException();
+        throw CancelledException("Part upload cancelled");
       }
 
       // Check for expired URL
@@ -630,7 +597,7 @@ class MultipartUploadController {
     return false;
   }
 
-  /// Throws if cancelled.
+  /// Throws if cancelled or paused.
   void _throwIfCancelled() {
     if (_cancelToken?.isCancelled ?? false) {
       // Check if this is a pause or real cancel
@@ -639,10 +606,13 @@ class MultipartUploadController {
       if (errorString == _pausingReason || errorString.contains(_pausingReason)) {
         throw CancelledException(_pausingReason);
       }
-      throw CancelledException();
+      throw CancelledException("Upload cancelled");
+    }
+    if (_state == UploadState.paused) {
+      throw CancelledException(_pausingReason);
     }
     if (_state == UploadState.cancelled) {
-      throw CancelledException();
+      throw CancelledException("Upload was cancelled");
     }
   }
 

@@ -34,7 +34,7 @@ class CancellationToken {
   /// Throws [CancelledException] if cancelled.
   void throwIfCancelled() {
     if (_isCancelled) {
-      throw CancelledException();
+      throw CancelledException("Operation cancelled");
     }
   }
 }

@@ -155,6 +155,8 @@ class Fluppy {
 
       // Check if all uploads are complete and emit AllUploadsComplete if needed
       _checkAndEmitAllUploadsComplete();
+    } catch (e) {
+      // Individual file errors are handled in _uploadFile
     } finally {
       _isUploading = false;
     }

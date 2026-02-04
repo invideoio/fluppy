@@ -912,7 +912,7 @@ void main() {
             },
             listParts: (file, opts) async {
               // Add delay to allow pause during listParts
-              await Future.delayed(const Duration(milliseconds: 150));
+              await Future.delayed(const Duration(milliseconds: 300));
               return file.uploadedParts;
             },
             completeMultipartUpload: (file, opts) async => const CompleteMultipartResult(),
@@ -936,15 +936,19 @@ void main() {
         await Future.delayed(const Duration(milliseconds: 50));
         await uploader.pause(file);
 
-        // Start resume
+        // The initial uploadFuture throws PausedException because start() now
+        // propagates pause errors directly instead of through a Completer.
+        await expectLater(uploadFuture, throwsA(isA<PausedException>()));
+
+        // Start resume (don't await — we'll pause during it)
         final resumeFuture = uploader.resume(
           file,
           onProgress: (_) {},
           emitEvent: (_) {},
         );
 
-        // Pause again during resume (while listParts or signPart is executing)
-        await Future.delayed(const Duration(milliseconds: 75));
+        // Pause again during resume (while listParts is executing with 300ms delay)
+        await Future.delayed(const Duration(milliseconds: 100));
         await uploader.pause(file);
 
         // Resume should throw PausedException
@@ -958,7 +962,6 @@ void main() {
         );
 
         await expectLater(resumeFuture2, completes);
-        await expectLater(uploadFuture, completes);
       });
     });
 

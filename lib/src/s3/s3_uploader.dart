@@ -335,7 +335,7 @@ class S3Uploader extends Uploader with RetryMixin {
           return _DioResponseWrapper(dioResponse);
         } on DioException catch (e) {
           if (e.type == DioExceptionType.cancel) {
-            throw CancelledException();
+            throw CancelledException("Upload cancelled");
           }
 
           // Check for expired URL
@@ -485,7 +485,7 @@ class S3Uploader extends Uploader with RetryMixin {
       );
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel) {
-        throw CancelledException();
+        throw CancelledException("Upload cancelled");
       }
 
       if (e.response != null &&
